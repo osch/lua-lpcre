@@ -1,0 +1,7 @@
+/build
+/src/build
+/src/sandbox.mk
+*.o
+*.so
+*.dll
+a.out

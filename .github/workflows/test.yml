@@ -1,0 +1,79 @@
+name: test
+
+on: [push, workflow_dispatch]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        luaVersion: ["5.1", "5.2", "5.3", "5.4", "5.5", "luajit"]
+        exclude:
+          # LuaJIT on Windows can't find the Lua library when building C
+          # modules with gh-actions-lua, so skip it there.
+          - os: windows-latest
+            luaVersion: luajit
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@master
+
+    - uses: ilammy/msvc-dev-cmd@v1
+      if: runner.os == 'Windows'
+
+    - name: remove conflicting Git link.exe (Windows)
+      # Git for Windows ships a coreutils "link" (hardlink tool) in usr/bin
+      # that shadows MSVC's link.exe under the bash shell used below.
+      if: runner.os == 'Windows'
+      shell: bash
+      run: rm -f "/usr/bin/link.exe"
+
+    - name: install pcre2 (Linux)
+      if: runner.os == 'Linux'
+      run: sudo apt-get install -y libpcre2-dev
+
+    - name: install pcre2 (macOS)
+      if: runner.os == 'macOS'
+      run: |
+        brew install pcre2
+        echo "PCRE2_DIR=$(brew --prefix pcre2)" >> $GITHUB_ENV
+
+    - name: install pcre2 (Windows)
+      if: runner.os == 'Windows'
+      shell: bash
+      run: |
+        vcpkg install pcre2:x64-windows
+        echo "PCRE2_DIR=$VCPKG_INSTALLATION_ROOT/installed/x64-windows" >> $GITHUB_ENV
+        echo "$VCPKG_INSTALLATION_ROOT/installed/x64-windows/bin" >> $GITHUB_PATH
+
+    - uses: luarocks/gh-actions-lua@v14
+      with:
+        luaVersion: ${{ matrix.luaVersion }}
+
+    - uses: luarocks/gh-actions-luarocks@v7
+
+    - name: setup 
+      shell: bash
+      run: |
+        luarocks install carray
+        luarocks make tests/lpcre_multistate-scm-0.rockspec
+        luarocks make tests/lpcre_testcarray-scm-0.rockspec
+        if [ -n "$PCRE2_DIR" ]; then
+            luarocks make rockspecs/lpcre-scm-0.rockspec PCRE2_DIR="$PCRE2_DIR"
+        else
+            luarocks make rockspecs/lpcre-scm-0.rockspec
+        fi
+
+    - name: test
+      shell: bash
+      run: |
+        set -e
+        lua -v
+        cd tests
+        lua test01.lua
+        lua test02.lua
+        lua test03.lua
+        cd ../examples
+        lua example01.lua
